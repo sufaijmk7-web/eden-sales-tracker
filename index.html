@@ -1004,7 +1004,7 @@
         let salesCache = [];
         let attendanceCache = [];
         
-        // Device detection for responsive behavior
+        // Device detection for responsive behavior (hidden from UI)
         const isMobile = window.innerWidth <= 768;
         const isTablet = window.innerWidth > 768 && window.innerWidth <= 1024;
         const isDesktop = window.innerWidth > 1024;
@@ -1133,6 +1133,12 @@
             
             // Auto-save to localStorage every 10 seconds
             setInterval(saveToLocalStorage, 10000);
+            
+            // Check for daily backup every hour
+            setInterval(checkDailyBackup, 3600000); // 1 hour = 3600000ms
+            
+            // Initial backup check
+            setTimeout(checkDailyBackup, 5000);
         });
 
         function showLoading() {
@@ -1143,7 +1149,7 @@
             document.getElementById('loadingOverlay').classList.add('hidden');
         }
 
-        // CRITICAL: localStorage backup system for data persistence with Google Drive integration
+        // ENHANCED: Multi-device data persistence with Firebase priority
         function saveToLocalStorage() {
             try {
                 const dataToSave = {
@@ -1156,20 +1162,90 @@
                     googleDriveFolder: 'https://drive.google.com/drive/folders/1W4FuhXKsGFAEgpcmg1mh8AIhtEGMOljI?usp=drive_link'
                 };
                 
+                // Save to localStorage for current device
                 localStorage.setItem('eden_app_data', JSON.stringify(dataToSave));
-                console.log('💾 Data saved to localStorage');
                 
-                // Auto-backup to Google Drive (if available)
-                autoBackupToGoogleDrive(dataToSave);
+                // CRITICAL: Also save to Firebase for cross-device sync
+                saveToFirebaseForSync(dataToSave);
+                
+                console.log('💾 Data saved to localStorage and Firebase');
+                
+                // Check for daily backup (3 AM)
+                checkDailyBackup();
             } catch (error) {
                 console.error('❌ Failed to save to localStorage:', error);
             }
         }
 
-        // Google Drive Auto-Backup Function
-        function autoBackupToGoogleDrive(data) {
+        // Enhanced Firebase sync for cross-device data sharing
+        async function saveToFirebaseForSync(data) {
             try {
-                // Create backup file content
+                if (window.db && window.firestore) {
+                    // Save each data type to Firebase for cross-device access
+                    
+                    // Save employees
+                    for (const [username, emp] of Object.entries(data.employees)) {
+                        try {
+                            if (emp.id && emp.id.startsWith('emp_')) {
+                                const docRef = window.firestore.doc(window.db, 'employees', emp.id);
+                                await window.firestore.setDoc(docRef, emp, { merge: true });
+                            }
+                        } catch (empError) {
+                            console.warn('Employee sync failed:', empError);
+                        }
+                    }
+                    
+                    // Save recent sales (last 100 for performance)
+                    const recentSales = data.sales.slice(0, 100);
+                    for (const sale of recentSales) {
+                        try {
+                            if (sale.id && !sale.id.startsWith('offline_')) {
+                                const docRef = window.firestore.doc(window.db, 'sales', sale.id);
+                                await window.firestore.setDoc(docRef, sale, { merge: true });
+                            }
+                        } catch (saleError) {
+                            console.warn('Sale sync failed:', saleError);
+                        }
+                    }
+                    
+                    console.log('🔄 Data synced to Firebase for cross-device access');
+                }
+            } catch (error) {
+                console.warn('⚠️ Firebase sync failed (data still saved locally):', error);
+            }
+        }
+
+        // Daily 3 AM Auto-Backup System
+        function checkDailyBackup() {
+            const now = new Date();
+            const lastBackup = localStorage.getItem('eden_last_backup_date');
+            const today = now.toISOString().split('T')[0];
+            
+            // Check if it's 3 AM and we haven't backed up today
+            if (now.getHours() === 3 && lastBackup !== today) {
+                performDailyBackup();
+            }
+            
+            // Also check every hour if we missed the 3 AM window
+            if (!lastBackup || lastBackup !== today) {
+                const timeSince3AM = now.getHours() >= 3 ? now.getHours() - 3 : (24 - 3) + now.getHours();
+                if (timeSince3AM <= 1) { // Within 1 hour of 3 AM
+                    performDailyBackup();
+                }
+            }
+        }
+
+        function performDailyBackup() {
+            try {
+                const data = {
+                    employees: employeesCache,
+                    products: productsCache,
+                    stores: storesCache,
+                    sales: salesCache,
+                    attendance: attendanceCache,
+                    timestamp: new Date().toISOString()
+                };
+
                 const backupContent = {
                     ...data,
                     backupInfo: {
@@ -1179,36 +1255,54 @@
                         totalSales: data.sales.length,
                         totalEmployees: Object.keys(data.employees).length,
                         totalProducts: data.products.length,
-                        totalStores: data.stores.length
+                        totalStores: data.stores.length,
+                        backupType: 'Daily Auto-Backup (3 AM)'
                     }
                 };
-                
-                // Create downloadable backup file
+
+                // Create backup file
                 const backupJson = JSON.stringify(backupContent, null, 2);
-                const backupBlob = new Blob([backupJson], { type: 'application/json' });
+                const blob = new Blob([backupJson], { type: 'application/json' });
+                const url = window.URL.createObjectURL(blob);
                 
-                // Store backup info in localStorage for manual download
-                localStorage.setItem('eden_backup_ready', JSON.stringify({
-                    timestamp: new Date().toISOString(),
-                    size: backupBlob.size,
-                    recordCount: data.sales.length
-                }));
+                // Auto-download the backup file
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Eden_Auto_Backup_${new Date().toISOString().split('T')[0]}_3AM.json`;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                // Mark backup as completed for today
+                localStorage.setItem('eden_last_backup_date', new Date().toISOString().split('T')[0]);
                 
-                console.log('📁 Google Drive backup prepared - use Download Backup button');
+                console.log('✅ Daily 3 AM backup completed automatically');
                 
-                // Show backup notification (only once per session)
-                if (!sessionStorage.getItem('backup_notification_shown')) {
-                    setTimeout(() => {
-                        if (confirm('📁 Auto-backup is ready!\n\nWould you like to download the backup file to save to your Google Drive folder?\n\n📂 Eden Sales Tracking Database\nhttps://drive.google.com/drive/folders/1W4FuhXKsGFAEgpcmg1mh8AIhtEGMOljI')) {
-                            downloadGoogleDriveBackup();
-                        }
-                        sessionStorage.setItem('backup_notification_shown', 'true');
-                    }, 2000);
-                }
+                // Show subtle notification (no popup)
+                showBackupNotification('✅ Daily backup completed - file downloaded automatically');
                 
             } catch (error) {
-                console.error('❌ Google Drive backup preparation failed:', error);
+                console.error('❌ Daily backup failed:', error);
             }
+        }
+
+        function showBackupNotification(message) {
+            const notification = document.createElement('div');
+            notification.innerHTML = `
+                <div class="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">
+                    ${message}
+                </div>
+            `;
+            document.body.appendChild(notification);
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 5000);
         }
 
         // Download backup file for Google Drive
@@ -1366,41 +1460,44 @@
             try {
                 showLoading();
                 
-                // Test Firebase connection first
+                // First, try to load from localStorage for immediate access
+                loadFromLocalStorage();
+                
+                // Test Firebase connection
                 if (!window.db) {
                     throw new Error('Firebase not initialized');
                 }
                 
-                console.log('🔥 Testing Firebase connection...');
+                console.log('🔥 Loading data from Firebase for cross-device sync...');
                 
-                // Skip test query and go directly to loading data
+                // Load Firebase data and merge with local data
                 await loadAllFirebaseData();
                 loadDropdownOptions();
                 hideLoading();
                 
-                // Show success message
-                console.log('✅ Firebase data loaded successfully!');
+                console.log('✅ Firebase data loaded and synced successfully!');
                 
             } catch (error) {
                 console.error('Firebase initialization error:', error);
                 hideLoading();
                 
+                // Always load from localStorage as fallback
+                loadFromLocalStorage();
+                loadDropdownOptions();
+                
                 // Handle permission errors gracefully
                 if (error.code === 'permission-denied') {
-                    console.warn('⚠️ Firebase permissions not configured yet - using offline mode');
-                    alert('Firebase permissions need to be configured. The app will work in offline mode with sample data for now.');
-                    initializeOfflineMode();
+                    console.warn('⚠️ Firebase permissions not configured - using local data');
+                    showBackupNotification('⚠️ Using local data - Firebase sync disabled');
                 } else if (error.code === 'unavailable') {
-                    console.warn('⚠️ Firebase temporarily unavailable - using offline mode');
-                    alert('Firebase service is temporarily unavailable. Using offline mode with sample data.');
-                    initializeOfflineMode();
+                    console.warn('⚠️ Firebase temporarily unavailable - using local data');
+                    showBackupNotification('⚠️ Firebase unavailable - using local data');
                 } else if (error.message.includes('not initialized')) {
-                    console.warn('⚠️ Firebase not initialized - using offline mode');
-                    alert('Firebase connection failed. Using offline mode with sample data.');
-                    initializeOfflineMode();
+                    console.warn('⚠️ Firebase not initialized - using local data');
+                    showBackupNotification('⚠️ Firebase not connected - using local data');
                 } else {
-                    console.log('📱 Initializing with sample data for first-time setup');
-                    initializeOfflineMode();
+                    console.log('📱 Using local data storage');
+                    showBackupNotification('📱 Running in local mode');
                 }
             }
         }
@@ -1883,7 +1980,11 @@
                 return;
             }
 
-            showLoading();
+            // IMMEDIATE FEEDBACK - Show saving status
+            const saveButton = document.querySelector('button[onclick="addSale()"]');
+            const originalText = saveButton.innerHTML;
+            saveButton.innerHTML = '💾 Saving...';
+            saveButton.disabled = true;
 
             try {
                 const sale = {
@@ -1904,30 +2005,39 @@
                 
                 console.log('💾 SAVING SALE:', sale);
 
-                // Try to save to Firebase, but continue if it fails
-                try {
-                    if (window.db && window.firestore) {
-                        const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, 'sales'), sale);
-                        saleId = docRef.id;
-                        console.log('✅ Sale saved to Firebase with ID:', saleId);
-                    } else {
-                        console.log('📱 Saving sale in offline mode with ID:', saleId);
-                    }
-                } catch (firebaseError) {
-                    console.warn('⚠️ Firebase save failed, continuing in offline mode:', firebaseError);
-                }
-                
-                // CRITICAL: Update local cache with complete data
+                // CRITICAL: Update local cache FIRST (immediate save)
                 const completeSale = { id: saleId, ...sale };
                 salesCache.unshift(completeSale);
                 console.log('📋 Sale added to cache. Total sales:', salesCache.length);
 
-                // 🔄 AUTOMATIC ATTENDANCE: Mark employee as present when they make a sale
-                await autoMarkAttendance(currentUser, date);
-
-                // CRITICAL: Save to localStorage with multiple keys for persistence
+                // IMMEDIATE: Save to localStorage
                 saveToLocalStorage();
                 
+                // IMMEDIATE: Update UI to show the new sale
+                loadEmployeeSalesData();
+
+                // Try Firebase in background (don't wait for it)
+                setTimeout(async () => {
+                    try {
+                        if (window.db && window.firestore) {
+                            const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, 'sales'), sale);
+                            console.log('✅ Sale synced to Firebase with ID:', docRef.id);
+                            
+                            // Update the sale ID in cache
+                            const saleIndex = salesCache.findIndex(s => s.id === saleId);
+                            if (saleIndex !== -1) {
+                                salesCache[saleIndex].id = docRef.id;
+                                saveToLocalStorage();
+                            }
+                        }
+                    } catch (firebaseError) {
+                        console.warn('⚠️ Firebase sync failed (data still saved locally):', firebaseError);
+                    }
+                }, 100);
+
+                // 🔄 AUTOMATIC ATTENDANCE: Mark employee as present
+                await autoMarkAttendance(currentUser, date);
+
                 // Additional backup - save sales separately
                 try {
                     localStorage.setItem('eden_sales_backup', JSON.stringify(salesCache));
@@ -1937,30 +2047,48 @@
                     console.error('❌ localStorage backup failed:', storageError);
                 }
 
-                // Clear form
+                // Clear form AFTER successful save
                 document.getElementById('storeName').value = '';
                 document.getElementById('productName').value = '';
                 document.getElementById('quantity').value = '';
                 document.getElementById('price').value = '';
 
-                hideLoading();
-                alert('Sale data saved successfully! 🎉\n✅ Attendance automatically marked as Present');
-                loadEmployeeSalesData();
+                // Reset button
+                saveButton.innerHTML = originalText;
+                saveButton.disabled = false;
+
+                // SUCCESS FEEDBACK
+                alert(`✅ SALE SAVED SUCCESSFULLY!\n\n📊 Sale Details:\n• Product: ${productName}\n• Quantity: ${quantity}\n• Store: ${storeName}\n• Total: ₹${quantity * price}\n• Date: ${date}\n\n🎯 Your sale is now visible in the sales history below!`);
                 
                 console.log('✅ Sale save process completed successfully');
+                
+                // Force refresh the sales display
+                setTimeout(() => {
+                    loadEmployeeSalesData();
+                }, 500);
+                
             } catch (error) {
-                hideLoading();
+                // Reset button on error
+                saveButton.innerHTML = originalText;
+                saveButton.disabled = false;
+                
                 console.error('💥 Error adding sale:', error);
-                alert('Error saving sale data. Please try again.');
+                alert(`❌ Error saving sale: ${error.message}\n\nPlease try again or contact support.`);
             }
         }
 
         function loadEmployeeSalesData() {
+            console.log('🔄 Loading employee sales data...');
+            console.log('Current user:', currentUser);
+            console.log('Total sales in cache:', salesCache.length);
+            
             const employeeSales = salesCache.filter(sale => sale.username === currentUser);
+            console.log('Employee sales found:', employeeSales.length);
             
             // Calculate today's summary
             const today = new Date().toISOString().split('T')[0];
             const todaySales = employeeSales.filter(sale => sale.date === today);
+            console.log('Today\'s sales:', todaySales.length);
             
             let todayQty = 0;
             let todayRevenue = 0;
@@ -1971,32 +2099,56 @@
                 todayRevenue += sale.total;
             });
             
+            console.log('Today summary - Qty:', todayQty, 'Revenue:', todayRevenue, 'Orders:', todayOrders);
+            
             const todayQtyElement = document.getElementById('todayQty');
             const todayRevenueElement = document.getElementById('todayRevenue');
             const todayOrdersElement = document.getElementById('todayOrders');
             
-            if (todayQtyElement) todayQtyElement.textContent = todayQty;
-            if (todayRevenueElement) todayRevenueElement.textContent = `₹${todayRevenue.toLocaleString('en-IN')}`;
-            if (todayOrdersElement) todayOrdersElement.textContent = todayOrders;
+            if (todayQtyElement) {
+                todayQtyElement.textContent = todayQty;
+                console.log('✅ Updated quantity display');
+            }
+            if (todayRevenueElement) {
+                todayRevenueElement.textContent = `₹${todayRevenue.toLocaleString('en-IN')}`;
+                console.log('✅ Updated revenue display');
+            }
+            if (todayOrdersElement) {
+                todayOrdersElement.textContent = todayOrders;
+                console.log('✅ Updated orders display');
+            }
             
-            // Load sales history
-            const historyHtml = employeeSales.map(sale => `
-                <tr class="border-b border-gray-100">
-                    <td class="px-2 py-2 text-xs">${sale.date.split('-')[2]}/${sale.date.split('-')[1]}</td>
-                    <td class="px-2 py-2 text-xs">${sale.storeName.substring(0, 8)}...</td>
-                    <td class="px-2 py-2 text-xs">${sale.productName.substring(0, 8)}...</td>
-                    <td class="px-2 py-2 text-xs font-semibold">${sale.quantity}</td>
-                    <td class="px-2 py-2 text-xs font-semibold text-green-600">₹${sale.total}</td>
-                    <td class="px-2 py-2 text-xs">
-                        <span class="text-gray-400 text-xs">View Only</span>
-                    </td>
-                </tr>
-            `).join('');
+            // Load sales history with better error handling
+            let historyHtml = '';
+            if (employeeSales.length > 0) {
+                historyHtml = employeeSales.map((sale, index) => {
+                    console.log(`Processing sale ${index + 1}:`, sale);
+                    return `
+                        <tr class="border-b border-gray-100">
+                            <td class="px-2 py-2 text-xs">${sale.date ? sale.date.split('-')[2] + '/' + sale.date.split('-')[1] : 'N/A'}</td>
+                            <td class="px-2 py-2 text-xs">${sale.storeName ? (sale.storeName.length > 8 ? sale.storeName.substring(0, 8) + '...' : sale.storeName) : 'N/A'}</td>
+                            <td class="px-2 py-2 text-xs">${sale.productName ? (sale.productName.length > 8 ? sale.productName.substring(0, 8) + '...' : sale.productName) : 'N/A'}</td>
+                            <td class="px-2 py-2 text-xs font-semibold">${sale.quantity || 0}</td>
+                            <td class="px-2 py-2 text-xs font-semibold text-green-600">₹${sale.total || 0}</td>
+                            <td class="px-2 py-2 text-xs">
+                                <span class="text-green-500 text-xs">✅ Saved</span>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } else {
+                historyHtml = '<tr><td colspan="6" class="px-2 py-4 text-center text-gray-500 text-xs">No sales data yet - Add your first sale above!</td></tr>';
+            }
             
             const salesHistoryElement = document.getElementById('salesHistory');
             if (salesHistoryElement) {
-                salesHistoryElement.innerHTML = historyHtml || '<tr><td colspan="6" class="px-2 py-4 text-center text-gray-500 text-xs">No sales data yet</td></tr>';
+                salesHistoryElement.innerHTML = historyHtml;
+                console.log('✅ Updated sales history table');
+            } else {
+                console.error('❌ Sales history element not found!');
             }
+            
+            console.log('✅ Employee sales data loading completed');
         }
 
         async function loadAdminData() {
@@ -4204,5 +4356,5 @@ ${collection}: ${getCachedDataCount(collection)} items
             }
         }, 30000);
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96883492038df9fc',t:'MTc1NDA4MTQwMS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96887388f703fa00',t:'MTc1NDA4Mzk4MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
