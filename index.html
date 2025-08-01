@@ -29,7 +29,7 @@
         'orientation': 'portrait-primary',
         'icons': [
             {
-                'src': 'data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">🌸</text></svg>',
+                'src': 'data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"%23667eea\"/><text x=\"50\" y=\"65\" text-anchor=\"middle\" fill=\"white\" font-size=\"30\">E</text></svg>',
                 'sizes': '192x192',
                 'type': 'image/svg+xml'
             }
@@ -232,7 +232,10 @@
                 </div>
                 <div class="text-right">
                     <p class="text-xs text-purple-100">Welcome, <span id="employeeName"></span></p>
-                    <button onclick="logout()" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-3 py-1 rounded text-xs mt-1">Logout</button>
+                    <div class="flex items-center space-x-1 mt-1">
+                        <button onclick="manualSync()" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-xs" title="Sync data">🔄</button>
+                        <button onclick="logout()" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-3 py-1 rounded text-xs">Logout</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -336,7 +339,10 @@
                 </div>
                 <div class="text-right">
                     <p class="text-xs text-purple-100">Admin</p>
-                    <button onclick="logout()" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-3 py-1 rounded text-xs mt-1">Logout</button>
+                    <div class="flex items-center space-x-1 mt-1">
+                        <button onclick="manualSync()" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-2 py-1 rounded text-xs" title="Sync data">🔄</button>
+                        <button onclick="logout()" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-3 py-1 rounded text-xs">Logout</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -4469,6 +4475,57 @@ ${collection}: ${getCachedDataCount(collection)} items
                 }
             }
         });
+
+        // Manual sync function for the sync button
+        async function manualSync() {
+            if (!window.db) {
+                showSyncNotification('⚠️ Firebase not connected - using local data');
+                return;
+            }
+
+            const syncButton = document.querySelector('button[onclick="manualSync()"]');
+            if (syncButton) {
+                syncButton.innerHTML = '⏳';
+                syncButton.disabled = true;
+            }
+
+            try {
+                console.log('🔄 Manual sync initiated...');
+                const previousSalesCount = salesCache.length;
+                
+                await loadAllFirebaseData();
+                
+                const newSalesCount = salesCache.length;
+                if (newSalesCount > previousSalesCount) {
+                    const newSales = newSalesCount - previousSalesCount;
+                    showSyncNotification(`✅ Synced ${newSales} new sales from other devices`);
+                } else {
+                    showSyncNotification('✅ Data is up to date');
+                }
+                
+                // Refresh current view
+                if (currentUser) {
+                    if (isAdmin) {
+                        await loadAdminData();
+                        if (document.getElementById('allSalesData')) {
+                            loadAllSalesData();
+                        }
+                    } else {
+                        loadEmployeeSalesData();
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Manual sync error:', error);
+                showSyncNotification('❌ Sync failed - check connection');
+            } finally {
+                // Reset sync button
+                if (syncButton) {
+                    syncButton.innerHTML = '🔄';
+                    syncButton.disabled = false;
+                }
+            }
+        }
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968883b9b71ff9f8',t:'MTc1NDA4NDY0My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96888fd4528cf9ec',t:'MTc1NDA4NTEzOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
