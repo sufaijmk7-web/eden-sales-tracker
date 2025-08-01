@@ -1177,42 +1177,81 @@
             }
         }
 
-        // Enhanced Firebase sync for cross-device data sharing
+        // ENHANCED: Cross-device sales syncing with Firebase
         async function saveToFirebaseForSync(data) {
             try {
                 if (window.db && window.firestore) {
-                    // Save each data type to Firebase for cross-device access
+                    console.log('🔄 Starting Firebase sync for cross-device access...');
                     
-                    // Save employees
+                    // CRITICAL: Save ALL sales to Firebase for cross-device sync
+                    let salesSynced = 0;
+                    for (const sale of data.sales) {
+                        try {
+                            // Skip temporary offline IDs, but sync everything else
+                            if (sale.id && !sale.id.startsWith('offline_temp_')) {
+                                const docRef = window.firestore.doc(window.db, 'sales', sale.id);
+                                await window.firestore.setDoc(docRef, {
+                                    username: sale.username,
+                                    employeeName: sale.employeeName,
+                                    date: sale.date,
+                                    storeName: sale.storeName,
+                                    productName: sale.productName,
+                                    quantity: sale.quantity,
+                                    price: sale.price,
+                                    total: sale.total,
+                                    timestamp: sale.timestamp,
+                                    createdAt: sale.createdAt,
+                                    syncedAt: new Date().toISOString()
+                                }, { merge: true });
+                                salesSynced++;
+                            }
+                        } catch (saleError) {
+                            console.warn('Sale sync failed for ID:', sale.id, saleError);
+                        }
+                    }
+                    
+                    // Save employees for login sync
+                    let employeesSynced = 0;
                     for (const [username, emp] of Object.entries(data.employees)) {
                         try {
-                            if (emp.id && emp.id.startsWith('emp_')) {
+                            if (emp.id) {
                                 const docRef = window.firestore.doc(window.db, 'employees', emp.id);
                                 await window.firestore.setDoc(docRef, emp, { merge: true });
+                                employeesSynced++;
                             }
                         } catch (empError) {
                             console.warn('Employee sync failed:', empError);
                         }
                     }
                     
-                    // Save recent sales (last 100 for performance)
-                    const recentSales = data.sales.slice(0, 100);
-                    for (const sale of recentSales) {
-                        try {
-                            if (sale.id && !sale.id.startsWith('offline_')) {
-                                const docRef = window.firestore.doc(window.db, 'sales', sale.id);
-                                await window.firestore.setDoc(docRef, sale, { merge: true });
-                            }
-                        } catch (saleError) {
-                            console.warn('Sale sync failed:', saleError);
-                        }
-                    }
+                    console.log(`✅ Firebase sync completed: ${salesSynced} sales, ${employeesSynced} employees`);
                     
-                    console.log('🔄 Data synced to Firebase for cross-device access');
+                    // Show sync status to user
+                    if (salesSynced > 0) {
+                        showSyncNotification(`✅ ${salesSynced} sales synced across devices`);
+                    }
                 }
             } catch (error) {
                 console.warn('⚠️ Firebase sync failed (data still saved locally):', error);
+                showSyncNotification('⚠️ Offline mode - data saved locally only');
             }
+        }
+
+        function showSyncNotification(message) {
+            const notification = document.createElement('div');
+            notification.innerHTML = `
+                <div class="fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">
+                    ${message}
+                </div>
+            `;
+            document.body.appendChild(notification);
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 3000);
         }
 
         // Daily 3 AM Auto-Backup System
@@ -1607,7 +1646,7 @@
                     storesCache = [];
                 }
 
-                // Load sales with fallback (try with and without orderBy)
+                // ENHANCED: Load sales with proper cross-device merging
                 try {
                     let salesSnapshot;
                     try {
@@ -1622,36 +1661,53 @@
                         salesSnapshot = await window.firestore.getDocs(window.firestore.collection(window.db, 'sales'));
                     }
                     
-                    // CRITICAL: Don't reset salesCache completely - preserve existing data
-                    const newSalesCache = [];
+                    // CRITICAL: Proper cross-device sales merging
+                    const firebaseSales = [];
                     salesSnapshot.forEach((doc) => {
                         const saleData = { id: doc.id, ...doc.data() };
-                        newSalesCache.push(saleData);
+                        firebaseSales.push(saleData);
                     });
                     
-                    // Only update cache if we got data from Firebase
-                    if (newSalesCache.length > 0) {
-                        // Merge with existing sales, avoiding duplicates
-                        const existingIds = new Set(salesCache.map(s => s.id));
-                        newSalesCache.forEach(sale => {
-                            if (!existingIds.has(sale.id)) {
-                                salesCache.push(sale);
+                    console.log(`🔥 Found ${firebaseSales.length} sales in Firebase`);
+                    console.log(`📱 Found ${salesCache.length} sales in local cache`);
+                    
+                    if (firebaseSales.length > 0) {
+                        // Create a comprehensive merged list
+                        const mergedSales = new Map();
+                        
+                        // First, add all local sales
+                        salesCache.forEach(sale => {
+                            if (sale.id) {
+                                mergedSales.set(sale.id, sale);
                             }
                         });
                         
-                        // Sort manually
+                        // Then, add/update with Firebase sales (Firebase takes priority)
+                        firebaseSales.forEach(sale => {
+                            if (sale.id) {
+                                mergedSales.set(sale.id, sale);
+                            }
+                        });
+                        
+                        // Convert back to array and sort
+                        salesCache = Array.from(mergedSales.values());
                         salesCache.sort((a, b) => {
                             const dateA = new Date(a.timestamp || a.createdAt || a.date);
                             const dateB = new Date(b.timestamp || b.createdAt || b.date);
                             return dateB - dateA;
                         });
                         
-                        console.log(`✅ Loaded ${newSalesCache.length} sales from Firebase, total: ${salesCache.length}`);
+                        console.log(`✅ MERGED SALES: ${salesCache.length} total (${firebaseSales.length} from Firebase + local)`);
+                        
+                        // Show sync notification
+                        if (firebaseSales.length > 0) {
+                            showSyncNotification(`📥 Loaded ${firebaseSales.length} sales from other devices`);
+                        }
                     } else {
                         console.log('📱 No sales in Firebase, keeping existing cache');
                     }
                 } catch (error) {
-                    console.warn('⚠️ No sales collection found or error loading:', error);
+                    console.warn('⚠️ Firebase sales loading failed:', error);
                     // Don't reset salesCache - keep existing data
                     if (salesCache.length === 0) {
                         console.log('🔧 Initializing with empty sales cache');
@@ -2016,22 +2072,32 @@
                 // IMMEDIATE: Update UI to show the new sale
                 loadEmployeeSalesData();
 
-                // Try Firebase in background (don't wait for it)
+                // IMMEDIATE Firebase sync for cross-device access
                 setTimeout(async () => {
                     try {
                         if (window.db && window.firestore) {
-                            const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, 'sales'), sale);
+                            console.log('🔄 Syncing sale to Firebase for cross-device access...');
+                            const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, 'sales'), {
+                                ...sale,
+                                syncedAt: new Date().toISOString(),
+                                deviceId: navigator.userAgent.substring(0, 50) // Track which device created it
+                            });
                             console.log('✅ Sale synced to Firebase with ID:', docRef.id);
                             
-                            // Update the sale ID in cache
+                            // Update the sale ID in cache for future updates
                             const saleIndex = salesCache.findIndex(s => s.id === saleId);
                             if (saleIndex !== -1) {
                                 salesCache[saleIndex].id = docRef.id;
+                                salesCache[saleIndex].firebaseId = docRef.id;
                                 saveToLocalStorage();
                             }
+                            
+                            // Show success notification
+                            showSyncNotification('✅ Sale synced across all devices');
                         }
                     } catch (firebaseError) {
                         console.warn('⚠️ Firebase sync failed (data still saved locally):', firebaseError);
+                        showSyncNotification('⚠️ Sale saved locally - will sync when online');
                     }
                 }, 100);
 
@@ -4344,17 +4410,65 @@ ${collection}: ${getCachedDataCount(collection)} items
 
 
 
-        // Auto-refresh admin data every 30 seconds
+        // ENHANCED: Auto-refresh data every 30 seconds for cross-device sync
         setInterval(async () => {
-            if (isAdmin && window.db) {
+            if (window.db) {
                 try {
+                    console.log('🔄 Checking for cross-device updates...');
+                    const previousSalesCount = salesCache.length;
+                    
+                    // Load latest data from Firebase
                     await loadAllFirebaseData();
-                    await loadAdminData();
+                    
+                    // Check if new sales were added from other devices
+                    const newSalesCount = salesCache.length;
+                    if (newSalesCount > previousSalesCount) {
+                        const newSales = newSalesCount - previousSalesCount;
+                        showSyncNotification(`📥 ${newSales} new sales from other devices`);
+                        
+                        // Refresh UI if user is logged in
+                        if (currentUser) {
+                            if (isAdmin) {
+                                await loadAdminData();
+                                if (document.getElementById('allSalesData')) {
+                                    loadAllSalesData();
+                                }
+                            } else {
+                                loadEmployeeSalesData();
+                            }
+                        }
+                    }
                 } catch (error) {
-                    console.error('Error refreshing data:', error);
+                    console.error('Error in periodic sync:', error);
                 }
             }
         }, 30000);
+
+        // IMMEDIATE: Sync check when app becomes visible (user switches back to tab)
+        document.addEventListener('visibilitychange', async () => {
+            if (!document.hidden && window.db && currentUser) {
+                console.log('🔄 App became visible - checking for updates...');
+                try {
+                    const previousSalesCount = salesCache.length;
+                    await loadAllFirebaseData();
+                    
+                    const newSalesCount = salesCache.length;
+                    if (newSalesCount > previousSalesCount) {
+                        const newSales = newSalesCount - previousSalesCount;
+                        showSyncNotification(`📥 ${newSales} new sales synced while away`);
+                        
+                        // Refresh current view
+                        if (isAdmin) {
+                            await loadAdminData();
+                        } else {
+                            loadEmployeeSalesData();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error in visibility sync:', error);
+                }
+            }
+        });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96887388f703fa00',t:'MTc1NDA4Mzk4MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968883b9b71ff9f8',t:'MTc1NDA4NDY0My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
