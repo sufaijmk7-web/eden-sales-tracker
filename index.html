@@ -1170,81 +1170,118 @@
         // ENHANCED: Real-time cross-device sales syncing with Firebase
         async function saveToFirebaseForSync(data) {
             try {
-                if (window.db && window.firestore) {
-                    console.log('🔄 Starting REAL-TIME Firebase sync for cross-device access...');
+                // Enhanced Firebase connection check
+                if (!window.db || !window.firestore) {
+                    console.log('📱 Firebase not initialized - using local storage only');
+                    showSyncNotification('📱 Local mode - Firebase not connected');
+                    return;
+                }
+
+                // Test Firebase connection with a simple read
+                try {
+                    const testRef = window.firestore.doc(window.db, 'system', 'connection_test');
+                    await window.firestore.getDoc(testRef);
+                    console.log('🔥 Firebase connection verified');
+                } catch (connectionError) {
+                    console.warn('❌ Firebase connection test failed:', connectionError);
                     
-                    // CRITICAL: Save ALL sales to Firebase with real-time sync
-                    let salesSynced = 0;
-                    for (const sale of data.sales) {
-                        try {
-                            // Use setDoc with merge for real-time updates
-                            if (sale.id && !sale.id.startsWith('offline_temp_')) {
-                                const docRef = window.firestore.doc(window.db, 'sales', sale.id);
-                                await window.firestore.setDoc(docRef, {
-                                    username: sale.username,
-                                    employeeName: sale.employeeName,
-                                    date: sale.date,
-                                    storeName: sale.storeName,
-                                    productName: sale.productName,
-                                    quantity: sale.quantity,
-                                    price: sale.price,
-                                    total: sale.total,
-                                    timestamp: sale.timestamp,
-                                    createdAt: sale.createdAt,
-                                    syncedAt: new Date().toISOString(),
-                                    deviceId: navigator.userAgent.substring(0, 50),
-                                    lastModified: Date.now() // For real-time detection
-                                }, { merge: true });
-                                salesSynced++;
-                            }
-                        } catch (saleError) {
-                            console.warn('Sale sync failed for ID:', sale.id, saleError);
-                        }
+                    if (connectionError.code === 'permission-denied') {
+                        showSyncNotification('🔒 Firebase permissions needed - using local storage');
+                    } else if (connectionError.code === 'unavailable') {
+                        showSyncNotification('🌐 Firebase offline - data saved locally');
+                    } else {
+                        showSyncNotification('❌ Firebase error - using local storage');
                     }
-                    
-                    // Save employees for login sync with real-time updates
-                    let employeesSynced = 0;
-                    for (const [username, emp] of Object.entries(data.employees)) {
-                        try {
-                            if (emp.id) {
-                                const docRef = window.firestore.doc(window.db, 'employees', emp.id);
-                                await window.firestore.setDoc(docRef, {
-                                    ...emp,
-                                    lastModified: Date.now(),
-                                    syncedAt: new Date().toISOString()
-                                }, { merge: true });
-                                employeesSynced++;
-                            }
-                        } catch (empError) {
-                            console.warn('Employee sync failed:', empError);
-                        }
-                    }
-                    
-                    // CRITICAL: Update sync timestamp for other devices to detect changes
+                    return;
+                }
+
+                console.log('🔄 Starting Firebase sync for cross-device access...');
+                
+                // CRITICAL: Save ALL sales to Firebase with real-time sync
+                let salesSynced = 0;
+                for (const sale of data.sales) {
                     try {
-                        const syncDocRef = window.firestore.doc(window.db, 'system', 'lastSync');
-                        await window.firestore.setDoc(syncDocRef, {
-                            timestamp: Date.now(),
-                            lastSyncBy: currentUser || 'unknown',
-                            salesCount: data.sales.length,
-                            employeesCount: Object.keys(data.employees).length,
-                            syncedAt: new Date().toISOString()
-                        }, { merge: true });
-                        console.log('✅ Sync timestamp updated for real-time detection');
-                    } catch (syncError) {
-                        console.warn('Sync timestamp update failed:', syncError);
-                    }
-                    
-                    console.log(`✅ REAL-TIME Firebase sync completed: ${salesSynced} sales, ${employeesSynced} employees`);
-                    
-                    // Show sync status to user
-                    if (salesSynced > 0) {
-                        showSyncNotification(`✅ ${salesSynced} sales synced LIVE across devices`);
+                        // Use setDoc with merge for real-time updates
+                        if (sale.id && !sale.id.startsWith('offline_temp_')) {
+                            const docRef = window.firestore.doc(window.db, 'sales', sale.id);
+                            await window.firestore.setDoc(docRef, {
+                                username: sale.username,
+                                employeeName: sale.employeeName,
+                                date: sale.date,
+                                storeName: sale.storeName,
+                                productName: sale.productName,
+                                quantity: sale.quantity,
+                                price: sale.price,
+                                total: sale.total,
+                                timestamp: sale.timestamp,
+                                createdAt: sale.createdAt,
+                                syncedAt: new Date().toISOString(),
+                                deviceId: navigator.userAgent.substring(0, 50),
+                                lastModified: Date.now() // For real-time detection
+                            }, { merge: true });
+                            salesSynced++;
+                        }
+                    } catch (saleError) {
+                        console.warn('Sale sync failed for ID:', sale.id, saleError);
                     }
                 }
+                
+                // Save employees for login sync with real-time updates
+                let employeesSynced = 0;
+                for (const [username, emp] of Object.entries(data.employees)) {
+                    try {
+                        if (emp.id) {
+                            const docRef = window.firestore.doc(window.db, 'employees', emp.id);
+                            await window.firestore.setDoc(docRef, {
+                                ...emp,
+                                lastModified: Date.now(),
+                                syncedAt: new Date().toISOString()
+                            }, { merge: true });
+                            employeesSynced++;
+                        }
+                    } catch (empError) {
+                        console.warn('Employee sync failed:', empError);
+                    }
+                }
+                
+                // CRITICAL: Update sync timestamp for other devices to detect changes
+                try {
+                    const syncDocRef = window.firestore.doc(window.db, 'system', 'lastSync');
+                    await window.firestore.setDoc(syncDocRef, {
+                        timestamp: Date.now(),
+                        lastSyncBy: currentUser || 'unknown',
+                        salesCount: data.sales.length,
+                        employeesCount: Object.keys(data.employees).length,
+                        syncedAt: new Date().toISOString(),
+                        connectionStatus: 'connected'
+                    }, { merge: true });
+                    console.log('✅ Sync timestamp updated for real-time detection');
+                } catch (syncError) {
+                    console.warn('Sync timestamp update failed:', syncError);
+                }
+                
+                console.log(`✅ Firebase sync completed: ${salesSynced} sales, ${employeesSynced} employees`);
+                
+                // Show success notification
+                if (salesSynced > 0 || employeesSynced > 0) {
+                    showSyncNotification(`✅ ${salesSynced} sales + ${employeesSynced} staff synced to Firebase`);
+                } else {
+                    showSyncNotification('✅ Firebase connected - data synced');
+                }
+                
             } catch (error) {
                 console.warn('⚠️ Firebase sync failed (data still saved locally):', error);
-                showSyncNotification('⚠️ Offline mode - data saved locally only');
+                
+                // Better error messages based on error type
+                if (error.code === 'permission-denied') {
+                    showSyncNotification('🔒 Firebase permissions needed - data saved locally');
+                } else if (error.code === 'unavailable') {
+                    showSyncNotification('🌐 Firebase offline - data saved locally');
+                } else if (error.message.includes('network')) {
+                    showSyncNotification('📶 Network error - data saved locally');
+                } else {
+                    showSyncNotification('⚠️ Firebase error - data saved locally');
+                }
             }
         }
 
@@ -2086,29 +2123,62 @@
                 // IMMEDIATE Firebase sync for cross-device access
                 setTimeout(async () => {
                     try {
-                        if (window.db && window.firestore) {
-                            console.log('🔄 Syncing sale to Firebase for cross-device access...');
-                            const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, 'sales'), {
-                                ...sale,
-                                syncedAt: new Date().toISOString(),
-                                deviceId: navigator.userAgent.substring(0, 50) // Track which device created it
-                            });
-                            console.log('✅ Sale synced to Firebase with ID:', docRef.id);
-                            
-                            // Update the sale ID in cache for future updates
-                            const saleIndex = salesCache.findIndex(s => s.id === saleId);
-                            if (saleIndex !== -1) {
-                                salesCache[saleIndex].id = docRef.id;
-                                salesCache[saleIndex].firebaseId = docRef.id;
-                                saveToLocalStorage();
-                            }
-                            
-                            // Show success notification
-                            showSyncNotification('✅ Sale synced across all devices');
+                        // Enhanced Firebase connection check
+                        if (!window.db || !window.firestore) {
+                            console.log('📱 Firebase not initialized - sale saved locally only');
+                            showSyncNotification('📱 Sale saved locally - Firebase not connected');
+                            return;
                         }
+
+                        // Test Firebase connection first
+                        try {
+                            const testRef = window.firestore.doc(window.db, 'system', 'connection_test');
+                            await window.firestore.getDoc(testRef);
+                        } catch (connectionError) {
+                            console.warn('❌ Firebase connection test failed:', connectionError);
+                            
+                            if (connectionError.code === 'permission-denied') {
+                                showSyncNotification('🔒 Sale saved locally - Firebase permissions needed');
+                            } else if (connectionError.code === 'unavailable') {
+                                showSyncNotification('🌐 Sale saved locally - Firebase offline');
+                            } else {
+                                showSyncNotification('❌ Sale saved locally - Firebase connection error');
+                            }
+                            return;
+                        }
+
+                        console.log('🔄 Syncing sale to Firebase for cross-device access...');
+                        const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, 'sales'), {
+                            ...sale,
+                            syncedAt: new Date().toISOString(),
+                            deviceId: navigator.userAgent.substring(0, 50) // Track which device created it
+                        });
+                        console.log('✅ Sale synced to Firebase with ID:', docRef.id);
+                        
+                        // Update the sale ID in cache for future updates
+                        const saleIndex = salesCache.findIndex(s => s.id === saleId);
+                        if (saleIndex !== -1) {
+                            salesCache[saleIndex].id = docRef.id;
+                            salesCache[saleIndex].firebaseId = docRef.id;
+                            saveToLocalStorage();
+                        }
+                        
+                        // Show success notification
+                        showSyncNotification('✅ Sale synced to Firebase - available on all devices');
+                        
                     } catch (firebaseError) {
                         console.warn('⚠️ Firebase sync failed (data still saved locally):', firebaseError);
-                        showSyncNotification('⚠️ Sale saved locally - will sync when online');
+                        
+                        // Better error messages
+                        if (firebaseError.code === 'permission-denied') {
+                            showSyncNotification('🔒 Sale saved locally - Firebase permissions needed');
+                        } else if (firebaseError.code === 'unavailable') {
+                            showSyncNotification('🌐 Sale saved locally - Firebase offline');
+                        } else if (firebaseError.message.includes('network')) {
+                            showSyncNotification('📶 Sale saved locally - network error');
+                        } else {
+                            showSyncNotification('⚠️ Sale saved locally - will sync when Firebase is available');
+                        }
                     }
                 }, 100);
 
@@ -4533,11 +4603,6 @@ ${collection}: ${getCachedDataCount(collection)} items
 
         // INSTANT Manual sync function for the sync button
         async function manualSync() {
-            if (!window.db) {
-                showSyncNotification('⚠️ Firebase not connected - using local data');
-                return;
-            }
-
             const syncButtons = document.querySelectorAll('button[onclick="manualSync()"]');
             syncButtons.forEach(btn => {
                 btn.innerHTML = '⏳';
@@ -4545,7 +4610,61 @@ ${collection}: ${getCachedDataCount(collection)} items
             });
 
             try {
-                console.log('🔄 INSTANT Manual sync initiated...');
+                // Enhanced Firebase connection check
+                if (!window.db || !window.firestore) {
+                    console.log('📱 Firebase not initialized - refreshing local data only');
+                    showSyncNotification('📱 Local mode - Firebase not connected');
+                    
+                    // Still refresh local data
+                    if (currentUser) {
+                        if (isAdmin) {
+                            await loadAdminData();
+                            loadStaffData();
+                            loadProductsData();
+                            loadStoresData();
+                        } else {
+                            loadEmployeeSalesData();
+                        }
+                    }
+                    return;
+                }
+
+                // Test Firebase connection first
+                try {
+                    const testRef = window.firestore.doc(window.db, 'system', 'connection_test');
+                    await window.firestore.getDoc(testRef);
+                    console.log('🔥 Firebase connection verified for manual sync');
+                } catch (connectionError) {
+                    console.warn('❌ Firebase connection failed during manual sync:', connectionError);
+                    
+                    let errorMessage = '❌ Sync failed - ';
+                    if (connectionError.code === 'permission-denied') {
+                        errorMessage += 'Firebase permissions needed';
+                    } else if (connectionError.code === 'unavailable') {
+                        errorMessage += 'Firebase offline';
+                    } else if (connectionError.message.includes('network')) {
+                        errorMessage += 'network error';
+                    } else {
+                        errorMessage += 'connection error';
+                    }
+                    
+                    showSyncNotification(errorMessage);
+                    
+                    // Still refresh local data
+                    if (currentUser) {
+                        if (isAdmin) {
+                            await loadAdminData();
+                            loadStaffData();
+                            loadProductsData();
+                            loadStoresData();
+                        } else {
+                            loadEmployeeSalesData();
+                        }
+                    }
+                    return;
+                }
+
+                console.log('🔄 Manual sync initiated with Firebase...');
                 
                 // Force immediate sync check
                 const syncDocRef = window.firestore.doc(window.db, 'system', 'lastSync');
@@ -4570,15 +4689,15 @@ ${collection}: ${getCachedDataCount(collection)} items
                 
                 if (newSalesCount > previousSalesCount) {
                     const newSales = newSalesCount - previousSalesCount;
-                    syncMessage = `✅ INSTANT: ${newSales} new sales synced from other devices`;
+                    syncMessage = `✅ ${newSales} new sales synced from Firebase`;
                 } else if (newEmployeesCount > previousEmployeesCount) {
                     const newEmployees = newEmployeesCount - previousEmployeesCount;
-                    syncMessage = `✅ INSTANT: ${newEmployees} new employees synced`;
+                    syncMessage = `✅ ${newEmployees} new employees synced from Firebase`;
                 } else if (newSalesCount < previousSalesCount) {
                     const deletedSales = previousSalesCount - newSalesCount;
-                    syncMessage = `✅ INSTANT: ${deletedSales} sales removed/updated`;
+                    syncMessage = `✅ ${deletedSales} sales updated from Firebase`;
                 } else {
-                    syncMessage = '✅ INSTANT: All data is up to date';
+                    syncMessage = '✅ All data is up to date with Firebase';
                 }
                 
                 showSyncNotification(syncMessage);
@@ -4608,7 +4727,37 @@ ${collection}: ${getCachedDataCount(collection)} items
                 
             } catch (error) {
                 console.error('Manual sync error:', error);
-                showSyncNotification('❌ Sync failed - check connection');
+                
+                // Better error messages
+                let errorMessage = '❌ Sync failed - ';
+                if (error.code === 'permission-denied') {
+                    errorMessage += 'Firebase permissions needed';
+                } else if (error.code === 'unavailable') {
+                    errorMessage += 'Firebase offline';
+                } else if (error.message.includes('network')) {
+                    errorMessage += 'network error';
+                } else {
+                    errorMessage += 'connection error';
+                }
+                
+                showSyncNotification(errorMessage);
+                
+                // Still try to refresh local data
+                try {
+                    if (currentUser) {
+                        if (isAdmin) {
+                            await loadAdminData();
+                            loadStaffData();
+                            loadProductsData();
+                            loadStoresData();
+                        } else {
+                            loadEmployeeSalesData();
+                        }
+                    }
+                } catch (localError) {
+                    console.error('Local data refresh also failed:', localError);
+                }
+                
             } finally {
                 // Reset sync buttons
                 syncButtons.forEach(btn => {
@@ -4618,5 +4767,5 @@ ${collection}: ${getCachedDataCount(collection)} items
             }
         }
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968b5b31e1a5f9f2',t:'MTc1NDExNDQ0MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968b6a50f11df9f0',t:'MTc1NDExNTA2MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
