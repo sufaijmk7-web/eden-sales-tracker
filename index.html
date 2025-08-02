@@ -153,160 +153,7 @@ onSnapshot(docRef, (docSnap) => {
 </script>
     
     <!-- Firebase SDK -->
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-        
-        // Your Firebase configuration
-        // ⚠️ SECURITY NOTE: In production, use environment variables and restrict API key usage
-        const firebaseConfig = {
-  apiKey: "AIzaSyAssY9abirSS2_EfKwvtvQfJ9w0uFcqcOY",
-  authDomain: "eden-sales-managment-2025.firebaseapp.com",
-  projectId: "eden-sales-managment-2025",
-  storageBucket: "eden-sales-managment-2025.firebasestorage.app",
-  messagingSenderId: "1015201947964",
-  appId: "1:1015201947964:web:03b9c9ed1c264fff6bbe39",
-  measurementId: "G-NVGJY66791"
-};
-        
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        
-        // Make Firebase available globally
-        window.db = db;
-        window.firestore = { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, orderBy };
     
-function updateSalesUI() {
-    const tbody = document.getElementById('salesHistory');
-    const today = new Date().toISOString().split('T')[0];
-    let todayQty = 0, todayRev = 0, todayOrders = 0;
-    tbody.innerHTML = '';
-    salesCache.forEach(sale => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="px-2 py-1 text-xs">${sale.date}</td>
-            <td class="px-2 py-1 text-xs">${sale.storeName}</td>
-            <td class="px-2 py-1 text-xs">${sale.productName}</td>
-            <td class="px-2 py-1 text-xs">${sale.quantity}</td>
-            <td class="px-2 py-1 text-xs">₹${sale.total || (sale.quantity * (sale.price || 0))}</td>
-            <td class="px-2 py-1 text-xs text-green-600">✅</td>
-        `;
-        tbody.appendChild(tr);
-        if (sale.date === today) {
-            todayQty += Number(sale.quantity);
-            todayRev += Number(sale.total || (sale.quantity * (sale.price || 0)));
-            todayOrders++;
-        }
-    });
-    document.getElementById('todayQty').innerText = todayQty;
-    document.getElementById('todayRevenue').innerText = '₹' + todayRev;
-    document.getElementById('todayOrders').innerText = todayOrders;
-}
-
-function updateStaffUI() {
-    const tbody = document.getElementById('staffData');
-    tbody.innerHTML = '';
-    Object.values(employeesCache).forEach(emp => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="px-4 py-2 text-sm">${emp.username}</td>
-            <td class="px-4 py-2 text-sm">${emp.name}</td>
-            <td class="px-4 py-2 text-sm">${emp.phone}</td>
-            <td class="px-4 py-2 text-sm">${emp.email}</td>
-            <td class="px-4 py-2 text-sm">${emp.status}</td>
-            <td class="px-4 py-2 text-sm">
-                <button onclick="editStaff('${emp.id}')" class="text-blue-600">✏️</button>
-                <button onclick="deleteStaff('${emp.id}')" class="text-red-600">🗑️</button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-function updateProductsUI() {
-    const tbody = document.getElementById('productsData');
-    const select = document.getElementById('productName');
-    const editSelect = document.getElementById('editSaleProduct');
-    tbody.innerHTML = '';
-    if (select) select.innerHTML = '<option value="">Select Product</option>';
-    if (editSelect) editSelect.innerHTML = '<option value="">Select Product</option>';
-    productsCache.forEach(prod => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="px-4 py-2 text-sm">${prod.name}</td>
-            <td class="px-4 py-2 text-sm">${prod.category}</td>
-            <td class="px-4 py-2 text-sm">₹${prod.price}</td>
-            <td class="px-4 py-2 text-sm">${prod.stock}</td>
-            <td class="px-4 py-2 text-sm">${prod.status}</td>
-            <td class="px-4 py-2 text-sm">
-                <button onclick="editProduct('${prod.id}')" class="text-blue-600">✏️</button>
-                <button onclick="deleteProduct('${prod.id}')" class="text-red-600">🗑️</button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-        if (select) select.innerHTML += `<option value="${prod.name}">${prod.name}</option>`;
-        if (editSelect) editSelect.innerHTML += `<option value="${prod.name}">${prod.name}</option>`;
-    });
-}
-
-function updateStoresUI() {
-    const tbody = document.getElementById('storesData');
-    const select = document.getElementById('storeName');
-    const editSelect = document.getElementById('editSaleStore');
-    tbody.innerHTML = '';
-    if (select) select.innerHTML = '<option value="">Select Store</option>';
-    if (editSelect) editSelect.innerHTML = '<option value="">Select Store</option>';
-    storesCache.forEach(store => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="px-4 py-2 text-sm">${store.name}</td>
-            <td class="px-4 py-2 text-sm">${store.location}</td>
-            <td class="px-4 py-2 text-sm">${store.manager}</td>
-            <td class="px-4 py-2 text-sm">${store.phone}</td>
-            <td class="px-4 py-2 text-sm">${store.status}</td>
-            <td class="px-4 py-2 text-sm">
-                <button onclick="editStore('${store.id}')" class="text-blue-600">✏️</button>
-                <button onclick="deleteStore('${store.id}')" class="text-red-600">🗑️</button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-        if (select) select.innerHTML += `<option value="${store.name}">${store.name}</option>`;
-        if (editSelect) editSelect.innerHTML += `<option value="${store.name}">${store.name}</option>`;
-    });
-}
-
-function updateAttendanceUI() {
-    const tbody = document.getElementById('attendanceData');
-    tbody.innerHTML = '';
-    attendanceCache.forEach(entry => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="px-4 py-2 text-sm">${entry.employeeName}</td>
-            <td class="px-4 py-2 text-sm">${entry.date}</td>
-            <td class="px-4 py-2 text-sm">${entry.status}</td>
-            <td class="px-4 py-2 text-sm">${entry.checkIn || '-'}</td>
-            <td class="px-4 py-2 text-sm">${entry.checkOut || '-'}</td>
-            <td class="px-4 py-2 text-sm">${entry.hours || '0h'}</td>
-            <td class="px-4 py-2 text-sm">
-                <button onclick="editAttendance('${entry.id}')" class="text-blue-600">✏️</button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-
-// Realtime sync for sales
-import { doc, onSnapshot } from "firebase/firestore";
-const docRef = doc(db, "sales", "demo-sale-id");
-onSnapshot(docRef, (docSnap) => {
-  if (docSnap.exists()) {
-    console.log("Realtime sale update:", docSnap.data());
-  }
-});
-
-</script>
     
     <style>
         .gradient-bg {
@@ -3885,8 +3732,7 @@ onSnapshot(docRef, (docSnap) => {
   <input id="loginPassword" type="password" placeholder="Password" />
   <button id="loginBtn">Login</button>
 </div>
-</body>
-                
+
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
   import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
@@ -3915,24 +3761,29 @@ onSnapshot(docRef, (docSnap) => {
       signInWithEmailAndPassword(auth, email, password)
         .then((userCredential) => {
           alert("✅ Login successful!");
-          console.log(userCredential.user);
+          console.log("Logged in:", userCredential.user.email);
           document.getElementById("loginSection").style.display = "none";
         })
         .catch((error) => {
           alert("❌ Login failed: " + error.message);
+          console.error(error);
         });
     });
   }
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
-      console.log("✅ Logged in:", user.email);
+      console.log("✅ User session:", user.email);
       document.getElementById("loginSection").style.display = "none";
     } else {
       document.getElementById("loginSection").style.display = "block";
     }
   });
 </script>
+
+</body>
+                
+
 </html>
             `;
             
@@ -5350,7 +5201,6 @@ onSnapshot(docRef, (docSnap) => {
   <input id="loginPassword" type="password" placeholder="Password" />
   <button id="loginBtn">Login</button>
 </div>
-</body>
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
@@ -5380,22 +5230,28 @@ onSnapshot(docRef, (docSnap) => {
       signInWithEmailAndPassword(auth, email, password)
         .then((userCredential) => {
           alert("✅ Login successful!");
-          console.log(userCredential.user);
+          console.log("Logged in:", userCredential.user.email);
           document.getElementById("loginSection").style.display = "none";
         })
         .catch((error) => {
           alert("❌ Login failed: " + error.message);
+          console.error(error);
         });
     });
   }
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
-      console.log("✅ Logged in:", user.email);
+      console.log("✅ User session:", user.email);
       document.getElementById("loginSection").style.display = "none";
     } else {
       document.getElementById("loginSection").style.display = "block";
     }
   });
 </script>
+
+</body>
+
+
 </html>
+
