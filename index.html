@@ -18,23 +18,7 @@
     <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="data:application/json,{
-        'name': 'Eden Perfume Sales Tracker',
-        'short_name': 'Eden Sales',
-        'description': 'Complete sales tracking system for Eden Perfume',
-        'start_url': './',
-        'display': 'standalone',
-        'background_color': '#ffffff',
-        'theme_color': '#667eea',
-        'orientation': 'portrait-primary',
-        'icons': [
-            {
-                'src': 'data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"%23667eea\"/><text x=\"50\" y=\"65\" text-anchor=\"middle\" fill=\"white\" font-size=\"30\">E</text></svg>',
-                'sizes': '192x192',
-                'type': 'image/svg+xml'
-            }
-        ]
-    }">
+    <link rel="manifest" href="data:application/json,{'name':'Eden Perfume Sales Tracker','short_name':'Eden Sales','description':'Complete sales tracking system for Eden Perfume','start_url':'./','display':'standalone','background_color':'#ffffff','theme_color':'#667eea','orientation':'portrait-primary','icons':[{'src':'data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"%23667eea\"/><text x=\"50\" y=\"65\" text-anchor=\"middle\" fill=\"white\" font-size=\"30\">E</text></svg>','sizes':'192x192','type':'image/svg+xml'}]}">
     
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -1183,17 +1167,17 @@
             }
         }
 
-        // ENHANCED: Cross-device sales syncing with Firebase
+        // ENHANCED: Real-time cross-device sales syncing with Firebase
         async function saveToFirebaseForSync(data) {
             try {
                 if (window.db && window.firestore) {
-                    console.log('🔄 Starting Firebase sync for cross-device access...');
+                    console.log('🔄 Starting REAL-TIME Firebase sync for cross-device access...');
                     
-                    // CRITICAL: Save ALL sales to Firebase for cross-device sync
+                    // CRITICAL: Save ALL sales to Firebase with real-time sync
                     let salesSynced = 0;
                     for (const sale of data.sales) {
                         try {
-                            // Skip temporary offline IDs, but sync everything else
+                            // Use setDoc with merge for real-time updates
                             if (sale.id && !sale.id.startsWith('offline_temp_')) {
                                 const docRef = window.firestore.doc(window.db, 'sales', sale.id);
                                 await window.firestore.setDoc(docRef, {
@@ -1207,7 +1191,9 @@
                                     total: sale.total,
                                     timestamp: sale.timestamp,
                                     createdAt: sale.createdAt,
-                                    syncedAt: new Date().toISOString()
+                                    syncedAt: new Date().toISOString(),
+                                    deviceId: navigator.userAgent.substring(0, 50),
+                                    lastModified: Date.now() // For real-time detection
                                 }, { merge: true });
                                 salesSynced++;
                             }
@@ -1216,13 +1202,17 @@
                         }
                     }
                     
-                    // Save employees for login sync
+                    // Save employees for login sync with real-time updates
                     let employeesSynced = 0;
                     for (const [username, emp] of Object.entries(data.employees)) {
                         try {
                             if (emp.id) {
                                 const docRef = window.firestore.doc(window.db, 'employees', emp.id);
-                                await window.firestore.setDoc(docRef, emp, { merge: true });
+                                await window.firestore.setDoc(docRef, {
+                                    ...emp,
+                                    lastModified: Date.now(),
+                                    syncedAt: new Date().toISOString()
+                                }, { merge: true });
                                 employeesSynced++;
                             }
                         } catch (empError) {
@@ -1230,11 +1220,26 @@
                         }
                     }
                     
-                    console.log(`✅ Firebase sync completed: ${salesSynced} sales, ${employeesSynced} employees`);
+                    // CRITICAL: Update sync timestamp for other devices to detect changes
+                    try {
+                        const syncDocRef = window.firestore.doc(window.db, 'system', 'lastSync');
+                        await window.firestore.setDoc(syncDocRef, {
+                            timestamp: Date.now(),
+                            lastSyncBy: currentUser || 'unknown',
+                            salesCount: data.sales.length,
+                            employeesCount: Object.keys(data.employees).length,
+                            syncedAt: new Date().toISOString()
+                        }, { merge: true });
+                        console.log('✅ Sync timestamp updated for real-time detection');
+                    } catch (syncError) {
+                        console.warn('Sync timestamp update failed:', syncError);
+                    }
+                    
+                    console.log(`✅ REAL-TIME Firebase sync completed: ${salesSynced} sales, ${employeesSynced} employees`);
                     
                     // Show sync status to user
                     if (salesSynced > 0) {
-                        showSyncNotification(`✅ ${salesSynced} sales synced across devices`);
+                        showSyncNotification(`✅ ${salesSynced} sales synced LIVE across devices`);
                     }
                 }
             } catch (error) {
@@ -4416,116 +4421,202 @@ ${collection}: ${getCachedDataCount(collection)} items
 
 
 
-        // ENHANCED: Auto-refresh data every 30 seconds for cross-device sync
+        // REAL-TIME: Auto-refresh data every 10 seconds for live cross-device sync
+        let lastSyncTimestamp = 0;
+        
         setInterval(async () => {
-            if (window.db) {
+            if (window.db && currentUser) {
                 try {
-                    console.log('🔄 Checking for cross-device updates...');
-                    const previousSalesCount = salesCache.length;
+                    // Check sync timestamp first to avoid unnecessary data loading
+                    const syncDocRef = window.firestore.doc(window.db, 'system', 'lastSync');
+                    const syncDoc = await window.firestore.getDoc(syncDocRef);
                     
-                    // Load latest data from Firebase
-                    await loadAllFirebaseData();
-                    
-                    // Check if new sales were added from other devices
-                    const newSalesCount = salesCache.length;
-                    if (newSalesCount > previousSalesCount) {
-                        const newSales = newSalesCount - previousSalesCount;
-                        showSyncNotification(`📥 ${newSales} new sales from other devices`);
+                    if (syncDoc.exists()) {
+                        const syncData = syncDoc.data();
+                        const serverTimestamp = syncData.timestamp || 0;
                         
-                        // Refresh UI if user is logged in
-                        if (currentUser) {
-                            if (isAdmin) {
-                                await loadAdminData();
-                                if (document.getElementById('allSalesData')) {
-                                    loadAllSalesData();
+                        // Only sync if there are changes from other devices
+                        if (serverTimestamp > lastSyncTimestamp && syncData.lastSyncBy !== currentUser) {
+                            console.log('🔄 LIVE UPDATE detected from other device...');
+                            const previousSalesCount = salesCache.length;
+                            
+                            // Load latest data from Firebase
+                            await loadAllFirebaseData();
+                            
+                            // Update our timestamp
+                            lastSyncTimestamp = serverTimestamp;
+                            
+                            // Check if new sales were added from other devices
+                            const newSalesCount = salesCache.length;
+                            if (newSalesCount > previousSalesCount) {
+                                const newSales = newSalesCount - previousSalesCount;
+                                showSyncNotification(`🔴 LIVE: ${newSales} new sales from other devices`);
+                                
+                                // Refresh UI immediately
+                                if (isAdmin) {
+                                    await loadAdminData();
+                                    if (document.getElementById('allSalesData')) {
+                                        loadAllSalesData();
+                                    }
+                                } else {
+                                    loadEmployeeSalesData();
                                 }
-                            } else {
-                                loadEmployeeSalesData();
+                                
+                                // Play notification sound (if supported)
+                                try {
+                                    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT');
+                                    audio.volume = 0.1;
+                                    audio.play().catch(() => {}); // Ignore errors
+                                } catch (e) {}
+                            } else if (syncData.salesCount !== salesCache.length || syncData.employeesCount !== Object.keys(employeesCache).length) {
+                                // Data structure changed
+                                showSyncNotification('🔄 LIVE: Data updated from other devices');
+                                
+                                // Refresh UI
+                                if (isAdmin) {
+                                    await loadAdminData();
+                                } else {
+                                    loadEmployeeSalesData();
+                                }
                             }
                         }
                     }
                 } catch (error) {
-                    console.error('Error in periodic sync:', error);
+                    console.error('Error in real-time sync:', error);
                 }
             }
-        }, 30000);
+        }, 10000); // Check every 10 seconds for real-time updates
 
-        // IMMEDIATE: Sync check when app becomes visible (user switches back to tab)
+        // INSTANT: Sync check when app becomes visible (user switches back to tab)
         document.addEventListener('visibilitychange', async () => {
             if (!document.hidden && window.db && currentUser) {
-                console.log('🔄 App became visible - checking for updates...');
+                console.log('🔄 App became visible - INSTANT sync check...');
                 try {
-                    const previousSalesCount = salesCache.length;
-                    await loadAllFirebaseData();
+                    // Force immediate sync check
+                    const syncDocRef = window.firestore.doc(window.db, 'system', 'lastSync');
+                    const syncDoc = await window.firestore.getDoc(syncDocRef);
                     
-                    const newSalesCount = salesCache.length;
-                    if (newSalesCount > previousSalesCount) {
-                        const newSales = newSalesCount - previousSalesCount;
-                        showSyncNotification(`📥 ${newSales} new sales synced while away`);
+                    if (syncDoc.exists()) {
+                        const syncData = syncDoc.data();
+                        const serverTimestamp = syncData.timestamp || 0;
                         
-                        // Refresh current view
-                        if (isAdmin) {
-                            await loadAdminData();
-                        } else {
-                            loadEmployeeSalesData();
+                        // Always sync when coming back to tab
+                        if (serverTimestamp > lastSyncTimestamp) {
+                            const previousSalesCount = salesCache.length;
+                            await loadAllFirebaseData();
+                            lastSyncTimestamp = serverTimestamp;
+                            
+                            const newSalesCount = salesCache.length;
+                            if (newSalesCount > previousSalesCount) {
+                                const newSales = newSalesCount - previousSalesCount;
+                                showSyncNotification(`⚡ INSTANT: ${newSales} new sales synced while away`);
+                                
+                                // Refresh current view immediately
+                                if (isAdmin) {
+                                    await loadAdminData();
+                                    if (document.getElementById('allSalesData')) {
+                                        loadAllSalesData();
+                                    }
+                                } else {
+                                    loadEmployeeSalesData();
+                                }
+                            } else {
+                                showSyncNotification('⚡ INSTANT: Data synced and up to date');
+                            }
                         }
                     }
                 } catch (error) {
-                    console.error('Error in visibility sync:', error);
+                    console.error('Error in instant visibility sync:', error);
                 }
             }
         });
 
-        // Manual sync function for the sync button
+        // INSTANT Manual sync function for the sync button
         async function manualSync() {
             if (!window.db) {
                 showSyncNotification('⚠️ Firebase not connected - using local data');
                 return;
             }
 
-            const syncButton = document.querySelector('button[onclick="manualSync()"]');
-            if (syncButton) {
-                syncButton.innerHTML = '⏳';
-                syncButton.disabled = true;
-            }
+            const syncButtons = document.querySelectorAll('button[onclick="manualSync()"]');
+            syncButtons.forEach(btn => {
+                btn.innerHTML = '⏳';
+                btn.disabled = true;
+            });
 
             try {
-                console.log('🔄 Manual sync initiated...');
-                const previousSalesCount = salesCache.length;
+                console.log('🔄 INSTANT Manual sync initiated...');
                 
+                // Force immediate sync check
+                const syncDocRef = window.firestore.doc(window.db, 'system', 'lastSync');
+                const syncDoc = await window.firestore.getDoc(syncDocRef);
+                
+                const previousSalesCount = salesCache.length;
+                const previousEmployeesCount = Object.keys(employeesCache).length;
+                
+                // Always reload data on manual sync
                 await loadAllFirebaseData();
                 
-                const newSalesCount = salesCache.length;
-                if (newSalesCount > previousSalesCount) {
-                    const newSales = newSalesCount - previousSalesCount;
-                    showSyncNotification(`✅ Synced ${newSales} new sales from other devices`);
-                } else {
-                    showSyncNotification('✅ Data is up to date');
+                // Update timestamp
+                if (syncDoc.exists()) {
+                    const syncData = syncDoc.data();
+                    lastSyncTimestamp = syncData.timestamp || Date.now();
                 }
                 
-                // Refresh current view
+                const newSalesCount = salesCache.length;
+                const newEmployeesCount = Object.keys(employeesCache).length;
+                
+                let syncMessage = '✅ Manual sync completed';
+                
+                if (newSalesCount > previousSalesCount) {
+                    const newSales = newSalesCount - previousSalesCount;
+                    syncMessage = `✅ INSTANT: ${newSales} new sales synced from other devices`;
+                } else if (newEmployeesCount > previousEmployeesCount) {
+                    const newEmployees = newEmployeesCount - previousEmployeesCount;
+                    syncMessage = `✅ INSTANT: ${newEmployees} new employees synced`;
+                } else if (newSalesCount < previousSalesCount) {
+                    const deletedSales = previousSalesCount - newSalesCount;
+                    syncMessage = `✅ INSTANT: ${deletedSales} sales removed/updated`;
+                } else {
+                    syncMessage = '✅ INSTANT: All data is up to date';
+                }
+                
+                showSyncNotification(syncMessage);
+                
+                // Force refresh current view
                 if (currentUser) {
                     if (isAdmin) {
                         await loadAdminData();
                         if (document.getElementById('allSalesData')) {
                             loadAllSalesData();
                         }
+                        // Refresh all admin tabs
+                        loadStaffData();
+                        loadProductsData();
+                        loadStoresData();
                     } else {
                         loadEmployeeSalesData();
                     }
                 }
                 
+                // Show detailed sync info in console
+                console.log(`📊 Sync Results:
+                    Sales: ${previousSalesCount} → ${newSalesCount}
+                    Employees: ${previousEmployeesCount} → ${newEmployeesCount}
+                    Products: ${productsCache.length}
+                    Stores: ${storesCache.length}`);
+                
             } catch (error) {
                 console.error('Manual sync error:', error);
                 showSyncNotification('❌ Sync failed - check connection');
             } finally {
-                // Reset sync button
-                if (syncButton) {
-                    syncButton.innerHTML = '🔄';
-                    syncButton.disabled = false;
-                }
+                // Reset sync buttons
+                syncButtons.forEach(btn => {
+                    btn.innerHTML = '🔄';
+                    btn.disabled = false;
+                });
             }
         }
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96888fd4528cf9ec',t:'MTc1NDA4NTEzOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968b5b31e1a5f9f2',t:'MTc1NDExNDQ0MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
